@@ -247,7 +247,7 @@ function ProgramDetail({ programKey }: { programKey: string }) {
       libraryKey: entry.key,
       name: entry.name,
     });
-    navigate("/train");
+    navigate("/routines");
   }
 
   return (

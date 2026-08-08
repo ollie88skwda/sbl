@@ -343,7 +343,7 @@ export function HomeHero() {
             {starting ? "Starting…" : "Empty session"}
           </Button>
           <Link
-            to="/train"
+            to="/routines"
             className="flex items-center gap-0.5 px-1 text-2xs text-faint transition-colors duration-150 hover:text-ink"
           >
             All routines <ChevronRight className="size-3" />

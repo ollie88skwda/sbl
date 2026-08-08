@@ -120,11 +120,11 @@ test("Save as routine and Copy workout from history detail", async ({
   // Dismiss the celebration overlay to reach the history-detail actions.
   await page.getByTestId("summary-dismiss").click();
 
-  // Save as routine → appears on Train.
+  // Save as routine → appears on the Routines page.
   await page.getByTestId("save-as-routine-btn").click();
   await page.getByTestId("routine-name-input").fill(ROUTINE);
   await page.getByTestId("save-as-routine-confirm").click();
-  await expect(page).toHaveURL(/\/train$/);
+  await expect(page).toHaveURL(/\/routines$/);
   await expect(page.getByTestId(`routine-card-${ROUTINE}`)).toBeVisible();
 
   // Copy workout → new session seeded from this one's sets.

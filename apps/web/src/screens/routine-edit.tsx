@@ -594,7 +594,7 @@ export default function RoutineEditScreen() {
       const input = toInput();
       if (id) await updateRoutine.mutateAsync({ routineId: id, patch: input });
       else await createRoutine.mutateAsync(input);
-      navigate("/train");
+      navigate("/routines");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error");
       setSaving(false);
@@ -618,7 +618,7 @@ export default function RoutineEditScreen() {
         </h1>
         {/* TODO(lessons): <InfoTip lessonId="programming-a-routine" /> once copy exists */}
         <div className="flex gap-2">
-          <Button variant="ghost" onClick={() => navigate("/train")}>
+          <Button variant="ghost" onClick={() => navigate("/routines")}>
             Cancel
           </Button>
           <Button

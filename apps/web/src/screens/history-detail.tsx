@@ -265,7 +265,7 @@ export default function HistoryDetailScreen() {
     };
     createRoutine.mutate(input);
     setSavingRoutine(false);
-    navigate("/train");
+    navigate("/routines");
   }
 
   // Copy workout: start a fresh session with the same exercises and seed each

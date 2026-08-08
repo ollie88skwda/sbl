@@ -29,7 +29,7 @@ test("session header links to routines, and the builder, mid-workout", async ({
 
   // The routines page is reachable mid-workout…
   await page.getByTestId("session-routines-btn").click();
-  await expect(page).toHaveURL(/\/train$/);
+  await expect(page).toHaveURL(/\/routines$/);
 
   // …and from it the create-routine builder.
   await page.getByTestId("new-routine-btn").click();

@@ -141,7 +141,7 @@ test("the Rest default still moves the Trainer's duration estimate", async ({
   const save = page.getByTestId("save-program-btn");
   await expect(save).toBeEnabled();
   await save.click();
-  await expect(page).toHaveURL(/\/train$/);
+  await expect(page).toHaveURL(/\/routines$/);
 
   await page.goto("/trainer");
   const card = page.getByTestId("next-workout-card");
@@ -185,7 +185,7 @@ test("the Rest default still moves the Trainer's duration estimate", async ({
   await page.getByTestId("routine-add-exercise-btn").click();
   await page.getByTestId(`routine-pick-${EX}`).click();
   await page.getByTestId("routine-save-btn").click();
-  await expect(page).toHaveURL(/\/train$/);
+  await expect(page).toHaveURL(/\/routines$/);
 
   // The editor default landed on the routine row…
   await expect

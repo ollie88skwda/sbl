@@ -90,13 +90,13 @@ test("the hero names today's routine, previews it, and starts it in one tap", as
     [PUSH, EX_A],
     [PULL, EX_B],
   ] as const) {
-    await page.goto("/train");
+    await page.goto("/routines");
     await page.getByTestId("new-routine-btn").click();
     await page.getByTestId("routine-name-input").fill(routine);
     await page.getByTestId("routine-add-exercise-btn").click();
     await page.getByTestId(`routine-pick-${ex}`).click();
     await page.getByTestId("routine-save-btn").click();
-    await expect(page).toHaveURL(/\/train$/);
+    await expect(page).toHaveURL(/\/routines$/);
   }
 
   await page.goto("/");

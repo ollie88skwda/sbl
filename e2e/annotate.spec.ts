@@ -80,6 +80,7 @@ test("annotate a live element, copy the payload, restore normal clicks", async (
 });
 
 test("notes can be edited and cleared before sending", async ({ page }) => {
+  await page.goto("/routines");
   await page.getByTestId("annotate-toggle").click();
   await page.getByTestId("new-routine-btn").click();
   await page.getByTestId("annotate-comment").fill("first draft");

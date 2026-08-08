@@ -2,7 +2,8 @@ import { expect, type Page, test } from "@playwright/test";
 import { EMAIL, PASSWORD, signIn } from "./helpers";
 
 // M11 program library: open a curated catalog program, save it, and confirm it
-// lands as a folder of routines in /train plus an active `programs` row.
+// lands as a folder of routines on the Routines page plus an active `programs`
+// row.
 
 test.beforeEach(async ({ page }) => {
   test.skip(!EMAIL || !PASSWORD, "run via `bun run e2e` (seeds the user)");
@@ -32,8 +33,8 @@ test("save a catalog program creates a named folder + routines + program row", a
   await expect(save).toBeEnabled();
   await save.click();
 
-  // Lands on the routines home with the program's folder.
-  await expect(page).toHaveURL(/\/train$/);
+  // Lands on the Routines page with the program's folder.
+  await expect(page).toHaveURL(/\/routines$/);
   await expect(
     page.getByTestId("folder-Full Body Foundations").first(),
   ).toBeVisible();

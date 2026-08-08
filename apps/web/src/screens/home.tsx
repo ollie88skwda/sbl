@@ -2,7 +2,7 @@ import { FIRST_WEEKDAY, sevenDayMuscleSets } from "@frog/core";
 import { BarChart3, Dumbbell, Plus, Users } from "lucide-react";
 import { useMemo } from "react";
 import { Link } from "react-router";
-import { BodyHeatmap } from "@/components/charts/body-heatmap";
+import { HumanBodyHeatmap } from "@/components/charts/human-body-heatmap";
 import { HomeHero } from "@/components/home-hero";
 import { ReportPromo } from "@/components/report-promo";
 import { StreakCard } from "@/components/streak-card";
@@ -47,7 +47,10 @@ export default function HomeScreen() {
         <StreakCard starts={starts} />
       </Link>
 
-      {/* Trailing-7-day muscle map — a glanceable teaser into full Statistics. */}
+      {/* Trailing-7-day muscle map — a glanceable teaser into full Statistics.
+          The human figure (react-body-highlighter, same as /stats) in its
+          non-interactive teaser mode: no chips, no selection, just the map
+          (docs/DECISIONS.md 2026-08-08, Routines-tab & Home-heatmap entry). */}
       <Link
         to="/stats"
         className="mt-4 block rounded-lg border border-border bg-surface p-4 transition-colors duration-150 ease-(--ease-out-quad) hover:border-border-strong"
@@ -58,7 +61,7 @@ export default function HomeScreen() {
           This week
         </div>
         <div className="mx-auto mt-2 max-w-56">
-          <BodyHeatmap muscleSets={sevenDay} interactive={false} />
+          <HumanBodyHeatmap muscleSets={sevenDay} interactive={false} />
         </div>
       </Link>
 

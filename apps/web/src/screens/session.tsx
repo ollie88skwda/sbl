@@ -1564,14 +1564,15 @@ export default function SessionScreen() {
           )}
           <RestTimer since={lastCommitAt} />
           {/* Routines stays reachable mid-workout: the shell's Training tab
-              jumps to this session while one is live, so /train (and from it
-              /routines/new) would otherwise be unreachable until you finish.
-              The session stays server-persisted, so this is safe to leave. */}
+              jumps to this session while one is live, so /routines (and from
+              it /routines/new) would otherwise be unreachable until you
+              finish. The session stays server-persisted, so this is safe to
+              leave. */}
           <Button
             variant="ghost"
             size="lg"
             className="ml-auto"
-            onClick={() => navigate("/train")}
+            onClick={() => navigate("/routines")}
             data-testid="session-routines-btn"
           >
             <NotebookPen className="size-4" />

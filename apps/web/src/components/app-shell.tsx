@@ -1,5 +1,5 @@
 import { APP_NAME } from "@frog/core";
-import { Dumbbell, Home, Moon, Sun, User } from "lucide-react";
+import { Dumbbell, Home, Moon, NotebookPen, Sun, User } from "lucide-react";
 import { lazy, Suspense, useMemo } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
 import { FrogMark } from "@/components/frog-mark";
@@ -17,6 +17,7 @@ const CommandPalette = lazy(() =>
 const NAV = [
   { to: "/", label: "Home", icon: Home, end: true, key: null },
   { to: "/train", label: "Training", icon: Dumbbell, key: null },
+  { to: "/routines", label: "Routines", icon: NotebookPen, key: null },
   { to: "/profile", label: "Profile", icon: User, key: null },
 ];
 
@@ -28,8 +29,8 @@ export function AppShell() {
   const { theme, toggle } = useTheme();
   const { data: active } = useActiveSession();
   const { pathname } = useLocation();
-  // Changelog lives inside Profile → Settings (no 4th tab — 2026-07-14), so
-  // its unseen-entry dot surfaces on the Profile nav item instead.
+  // Changelog lives inside Profile → Settings, so its unseen-entry dot
+  // surfaces on the Profile nav item instead.
   const hasUnseenChangelog = useChangelogHasUnseen();
 
   // The Training tab jumps straight into the live session when one exists, so

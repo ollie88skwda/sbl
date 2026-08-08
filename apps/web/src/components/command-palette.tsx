@@ -9,6 +9,7 @@ import {
   Lightbulb,
   LogOut,
   Moon,
+  NotebookPen,
   type Play,
   Ruler,
   ScrollText,
@@ -55,6 +56,12 @@ export function CommandPalette() {
   const nav: Item[] = [
     { label: "Home", icon: Home, action: () => navigate("/") },
     { label: "Training", icon: Dumbbell, action: () => navigate("/train") },
+    {
+      label: "Routines",
+      icon: NotebookPen,
+      action: () => navigate("/routines"),
+      keywords: "plans folders workout",
+    },
     { label: "Profile", icon: User, action: () => navigate("/profile") },
     {
       label: "Library",

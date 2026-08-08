@@ -61,7 +61,8 @@ function Figure({
 }: {
   view: "anterior" | "posterior";
   data: IExerciseData[];
-  onSelect: (m: Muscle) => void;
+  /** Region-tap handler; absent = non-interactive figure. */
+  onSelect?: (m: Muscle) => void;
 }) {
   return (
     <div>
@@ -70,7 +71,7 @@ function Figure({
         data={data}
         bodyColor={BODY_COLOR}
         highlightedColors={PALETTE}
-        onClick={(stats) => onSelect(stats.muscle)}
+        onClick={onSelect ? (stats) => onSelect(stats.muscle) : undefined}
         style={{ width: "100%", aspectRatio: "100 / 200" }}
         svgStyle={{ display: "block" }}
       />
@@ -84,12 +85,18 @@ function Figure({
 export function HumanBodyHeatmap({
   muscleSets,
   max: maxProp,
+  interactive = true,
   className,
   testId,
 }: {
   muscleSets: Record<string, number>;
   /** Explicit intensity ceiling; defaults to the busiest region. */
   max?: number;
+  /** Selection chips + tap-to-select regions (default true). Off for the
+   *  Home teaser, where the card is small and the figures are a glanceable
+   *  preview, not a control (docs/DECISIONS.md 2026-08-08, Routines-tab &
+   *  Home-heatmap entry). */
+  interactive?: boolean;
   className?: string;
   testId?: string;
 }) {
@@ -115,58 +122,59 @@ export function HumanBodyHeatmap({
 
   const selectedValue = selected ? regionSets[selected] : null;
 
+  const select = (m: Muscle) => {
+    const r = MUSCLE_TO_REGION.get(m);
+    if (r) setSelected(r);
+  };
+
   return (
     <div className={className} data-testid={testId}>
       <div className="grid grid-cols-2 gap-3">
         <Figure
           view="anterior"
           data={data}
-          onSelect={(m) => {
-            const r = MUSCLE_TO_REGION.get(m);
-            if (r) setSelected(r);
-          }}
+          onSelect={interactive ? select : undefined}
         />
         <Figure
           view="posterior"
           data={data}
-          onSelect={(m) => {
-            const r = MUSCLE_TO_REGION.get(m);
-            if (r) setSelected(r);
-          }}
+          onSelect={interactive ? select : undefined}
         />
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-1">
-        {REGION_ORDER.map((region) => {
-          const isSel = selected === region;
-          return (
-            <button
-              key={region}
-              type="button"
-              onClick={() => setSelected(region)}
-              className={
-                isSel
-                  ? "num h-7 bg-accent-soft px-2 text-2xs text-accent"
-                  : "num h-7 bg-translucent px-2 text-2xs text-soft transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
-              }
-              data-testid={`heatmap-chip-${region}`}
+      {interactive && (
+        <div className="mt-2 flex flex-wrap items-center gap-1">
+          {REGION_ORDER.map((region) => {
+            const isSel = selected === region;
+            return (
+              <button
+                key={region}
+                type="button"
+                onClick={() => setSelected(region)}
+                className={
+                  isSel
+                    ? "num h-7 bg-accent-soft px-2 text-2xs text-accent"
+                    : "num h-7 bg-translucent px-2 text-2xs text-soft transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
+                }
+                data-testid={`heatmap-chip-${region}`}
+              >
+                {MUSCLE_REGION_LABELS[region]}{" "}
+                <span className="text-faint">
+                  {formatSets(regionSets[region])}
+                </span>
+              </button>
+            );
+          })}
+          {selected && (
+            <span
+              className="num ml-auto text-2xs text-soft"
+              data-testid="heatmap-readout"
             >
-              {MUSCLE_REGION_LABELS[region]}{" "}
-              <span className="text-faint">
-                {formatSets(regionSets[region])}
-              </span>
-            </button>
-          );
-        })}
-        {selected && (
-          <span
-            className="num ml-auto text-2xs text-soft"
-            data-testid="heatmap-readout"
-          >
-            {MUSCLE_REGION_LABELS[selected]} · {formatSets(selectedValue ?? 0)}{" "}
-            sets
-          </span>
-        )}
-      </div>
+              {MUSCLE_REGION_LABELS[selected]} ·{" "}
+              {formatSets(selectedValue ?? 0)} sets
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

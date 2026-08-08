@@ -11,6 +11,7 @@ import { RepoProvider } from "@/lib/repo";
 const HomeScreen = lazy(() => import("@/screens/home"));
 const AuthScreen = lazy(() => import("@/screens/auth"));
 const TrainScreen = lazy(() => import("@/screens/train"));
+const RoutinesScreen = lazy(() => import("@/screens/routines"));
 const RoutineEditScreen = lazy(() => import("@/screens/routine-edit"));
 const ProgramsScreen = lazy(() => import("@/screens/programs"));
 const TrainerScreen = lazy(() => import("@/screens/trainer"));
@@ -91,6 +92,7 @@ export function App() {
                     <Route element={<AppShell />}>
                       <Route index element={<HomeScreen />} />
                       <Route path="train" element={<TrainScreen />} />
+                      <Route path="routines" element={<RoutinesScreen />} />
                       <Route
                         path="routines/new"
                         element={<RoutineEditScreen />}

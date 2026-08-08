@@ -32,7 +32,7 @@ test("parses a pasted routine into matched drafts and surfaces the unmatched lin
     await waitForExercise(page, name);
   }
 
-  await page.goto("/train");
+  await page.goto("/routines");
   await page.getByTestId("new-routine-btn").click();
   await expect(page).toHaveURL(/\/routines\/new/);
 
@@ -81,7 +81,7 @@ test("parses a pasted routine into matched drafts and surfaces the unmatched lin
 
   // Nothing saved until Save routine is hit.
   await page.getByTestId("routine-save-btn").click();
-  await expect(page).toHaveURL(/\/train$/);
+  await expect(page).toHaveURL(/\/routines$/);
 });
 
 test("caps an implausible set count into the unmatched list and resets the picker search after resolving", async ({
@@ -94,7 +94,7 @@ test("caps an implausible set count into the unmatched list and resets the picke
   await createExercise(page, EX);
   await waitForExercise(page, EX);
 
-  await page.goto("/train");
+  await page.goto("/routines");
   await page.getByTestId("new-routine-btn").click();
   await expect(page).toHaveURL(/\/routines\/new/);
 
@@ -144,7 +144,7 @@ test("picking one exercise resolves every unmatched line naming the same lift", 
   await createExercise(page, EX);
   await waitForExercise(page, EX);
 
-  await page.goto("/train");
+  await page.goto("/routines");
   await page.getByTestId("new-routine-btn").click();
   await expect(page).toHaveURL(/\/routines\/new/);
 
