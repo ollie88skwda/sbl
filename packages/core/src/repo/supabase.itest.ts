@@ -433,7 +433,12 @@ describe("SupabaseRepo (integration, local supabase)", () => {
     // The name-heuristic backfill migration (docs/DECISIONS.md 2026-08-01)
     // tags exactly 67 seed rows unilateral and 16 alternating; the
     // gimmick-equipment purge (docs/DECISIONS.md 2026-08-07) soft-deleted 18
-    // unilateral and 6 alternating of those, leaving 49 and 10.
+    // unilateral and 6 alternating of those, leaving 49 and 10. Alternating
+    // is no longer an option (docs/DECISIONS.md 2026-08-08 — folded into
+    // bilateral) but the seed DATA is untouched (text column, no migration):
+    // the 10 rows below still store the legacy value and the app reads them
+    // as bilateral. Pinning both raw counts keeps the backfill's classification
+    // honest against the seed.
     expect(seeds.filter((e) => e.laterality === "unilateral")).toHaveLength(49);
     expect(seeds.filter((e) => e.laterality === "alternating")).toHaveLength(
       10,

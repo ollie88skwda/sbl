@@ -199,26 +199,25 @@ export const MOVEMENT_PATTERN_LABELS: Record<MovementPattern, string> = {
   isolation: "Isolation",
 };
 
-// Bilateral vs unilateral vs alternating. Decides whether logged reps mean
-// per-side or total, and therefore per-side volume + PR comparability.
-// Display names are the unilateral/bilateral vocabulary the captain asked for
-// (2026-08-08, UI feedback note 15) — "sides" is not a UI word anymore.
-export const LATERALITY = ["bilateral", "unilateral", "alternating"] as const;
+// Bilateral vs unilateral (2026-08-08, UI feedback note 5: alternating is
+// gone, folded into bilateral — a DB row that still stores 'alternating'
+// reads as bilateral everywhere). Decides whether logged reps mean per-side
+// or total, and therefore per-side volume + PR comparability. Display names
+// are the unilateral/bilateral vocabulary the captain asked for (2026-08-08,
+// UI feedback note 15) — "sides" is not a UI word anymore.
+export const LATERALITY = ["bilateral", "unilateral"] as const;
 export type Laterality = (typeof LATERALITY)[number];
 export const LATERALITY_LABELS: Record<Laterality, string> = {
   bilateral: "Bilateral",
   unilateral: "Unilateral",
-  alternating: "Alternating",
 };
 
 // One-line explainers for the laterality menu, telling unilateral (each side
-// does the reps separately — two logged rows) apart from alternating (sides
-// alternate within one rep sequence — one row, total reps).
+// does the reps separately — two logged rows) apart from bilateral (one row
+// for the whole set).
 export const LATERALITY_EXPLAINERS: Record<Laterality, string> = {
   bilateral: "Both sides work together — one row per set.",
   unilateral: "One side at a time — each side's reps are logged separately.",
-  alternating:
-    "Sides alternate within the set — reps count both sides combined.",
 };
 
 export const SET_TYPES = ["normal", "warmup", "failure", "drop"] as const;

@@ -152,7 +152,8 @@ export const exercises = pgTable(
     // Movement pattern — the taxonomy the push/pull/legs day templates in
     // generator/generate.ts reconstruct from muscle keys.
     movementPattern: text("movement_pattern"),
-    // Bilateral vs unilateral vs alternating (domain/exercise-types).
+    // Bilateral vs unilateral (domain/exercise-types); legacy 'alternating'
+    // values read as bilateral since 2026-08-08 (docs/DECISIONS.md).
     laterality: text("laterality"),
     // Per-exercise defaults — prefill only, consumed by the routine editor's
     // "Add exercise" (default_rest_sec seeds routine_exercises.rest_sec; the
@@ -445,10 +446,11 @@ export const setLogs = pgTable(
     restSec: integer("rest_sec"), // seconds rested before this set (null = first/unknown)
     metricValues: jsonb("metric_values").$type<Record<string, unknown>>(), // {metricId: value}
     completed: boolean("completed").notNull().default(false),
-    // Which limb this row records. Null = the whole set (bilateral,
-    // alternating, and every row logged before this feature existed). A
-    // unilateral set is TWO rows sharing (session_exercise_id, set_no): one
-    // 'left', one 'right' — see docs/DECISIONS.md.
+    // Which limb this row records. Null = the whole set (bilateral, and every
+    // row logged before this feature existed — including legacy alternating
+    // rows, which read as bilateral since 2026-08-08). A unilateral set is TWO
+    // rows sharing (session_exercise_id, set_no): one 'left', one 'right' —
+    // see docs/DECISIONS.md.
     side: text("side"), // 'left' | 'right' | null
   },
   (t) => [

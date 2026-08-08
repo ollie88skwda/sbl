@@ -904,6 +904,7 @@ export class SupabaseRepo implements Repo {
     if ("setType" in patch) row.set_type = patch.setType ?? "normal";
     if ("durationSec" in patch) row.duration_sec = patch.durationSec ?? null;
     if ("distanceM" in patch) row.distance_m = patch.distanceM ?? null;
+    if ("side" in patch) row.side = patch.side ?? null;
     const { error } = await this.client
       .from("set_logs")
       .update(row)

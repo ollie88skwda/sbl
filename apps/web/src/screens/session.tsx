@@ -266,7 +266,6 @@ function columnsFor(
   type: ExerciseType,
   unit: Unit,
   distUnit: DistanceUnit,
-  laterality?: string | null,
 ): Column[] {
   const f = TYPE_FIELDS[type];
   const cols: Column[] = [];
@@ -274,14 +273,13 @@ function columnsFor(
     cols.push({ key: "weight", header: weightLabel(type, unitLabel(unit)) });
   if (f.distance) cols.push({ key: "distance", header: distUnit });
   if (f.duration) cols.push({ key: "duration", header: "time" });
-  // Unilateral: the ᴸ/ᴿ line markers already say "per side", so the header
-  // stays "reps". Alternating logs as one row whose reps are a total across
-  // both sides (L-R-L-R within the set) — the header says so since there's
-  // no per-line marker to carry that meaning.
   if (f.reps)
     cols.push({
       key: "reps",
-      header: laterality === "alternating" ? "total reps" : "reps",
+      // Unilateral: the ᴸ/ᴿ line markers already say "per side", so the
+      // header stays "reps" (legacy alternating rows read as bilateral too —
+      // docs/DECISIONS.md 2026-08-08).
+      header: "reps",
     });
   return cols;
 }
@@ -1197,6 +1195,149 @@ export default function SessionScreen() {
     );
   }
 
+  // Note 7: a committed set's details sheet can flip the set between
+  // bilateral (one row) and unilateral (two rows sharing set_no, side
+  // left/right) — the repo's unilateral-pair contract. Bilateral → unilateral
+  // flips the ᴸ row's side null → 'left' (a side-null row can never group
+  // with a right row — groupSetsBySetNo) and adds a mirrored ᴿ row (rest_sec
+  // null, the pair convention; custom per-set metrics don't round-trip
+  // through the client LoggedSet model, so the mirror carries none — same as
+  // a reload); unilateral → bilateral soft-deletes the ᴿ row and restores the
+  // ᴸ row's side to null. Only this one physical set (the groupSetsBySetNo
+  // group) is touched — never sibling rows.
+  function setCommittedLaterality(
+    seId: string,
+    exerciseType: ExerciseType,
+    primary: LoggedSet,
+    unilateral: boolean,
+  ) {
+    const block = (blocks ?? []).find((b) => b.seId === seId);
+    if (!block) return;
+    const group = groupSetsBySetNo(block.committed).find(
+      (g) => g[0].id === primary.id,
+    );
+    if (!group || group[0].id !== primary.id) return;
+    const leftRow = group[0];
+    if (unilateral && leftRow.side !== "left" && !group[1]) {
+      // The primary becomes the pair's ᴸ row (side null → 'left'), and a
+      // mirrored ᴿ row joins it at the same set_no. Set type stays shared —
+      // the ᴸ control writes both rows, as on commit.
+      const rightId = newId();
+      const rightRow: LoggedSet = {
+        id: rightId,
+        setNo: leftRow.setNo,
+        setType: leftRow.setType,
+        weightKg: leftRow.weightKg,
+        reps: leftRow.reps,
+        durationSec: leftRow.durationSec,
+        distanceM: leftRow.distanceM,
+        rir: leftRow.rir,
+        rirMin: leftRow.rirMin,
+        rirMax: leftRow.rirMax,
+        rpe: leftRow.rpe,
+        note: leftRow.note,
+        restSec: null,
+        side: "right",
+      };
+      setBlocks((prev) =>
+        (prev ?? []).map((b) =>
+          b.seId === seId
+            ? {
+                ...b,
+                committed: b.committed
+                  .map((s) =>
+                    s.id === leftRow.id ? { ...s, side: "left" as const } : s,
+                  )
+                  .concat(rightRow),
+              }
+            : b,
+        ),
+      );
+      const write = {
+        seId,
+        set: rightRow,
+        tempId: rightId,
+        setNo: leftRow.setNo,
+      };
+      queueSet(write);
+      logSet.mutate(write);
+      // The ᴸ row's side flip is a server write too (a null-side row would
+      // re-split the pair on reload) — and it must reach the ᴸ row's queued
+      // retry payload if that commit hasn't landed yet, or Retry rewrites the
+      // stale null side (saveSet's reconciliation pattern).
+      setQueuedSets((prev) => {
+        const queued = prev[leftRow.id];
+        if (!queued) return prev;
+        return {
+          ...prev,
+          [leftRow.id]: { ...queued, set: { ...queued.set, side: "left" } },
+        };
+      });
+      void repo.updateSet(idMap[leftRow.id] ?? leftRow.id, { side: "left" });
+      // Live PR check for the added side, like commitSet — either side of a
+      // unilateral pair can PR independently.
+      if (prSnapshot) {
+        const hits = checkSetForPR(
+          prSnapshot.get(block.exerciseId),
+          exerciseType,
+          {
+            setType: rightRow.setType ?? "normal",
+            weightKg: rightRow.weightKg,
+            reps: rightRow.reps,
+            durationSec: rightRow.durationSec,
+            distanceM: rightRow.distanceM,
+            setNo: rightRow.setNo,
+            side: "right",
+          },
+        );
+        if (hits.length) {
+          setPrSetIds((prev) => new Set(prev).add(rightId));
+          if (livePrEnabled) {
+            prIdRef.current += 1;
+            setPrBanner({
+              id: prIdRef.current,
+              exerciseName: block.name,
+              prTypes: hits.map((h) => h.prType),
+            });
+          }
+        }
+      }
+    } else if (!unilateral && leftRow.side === "left" && group[1]) {
+      const secondaryRow = group[1];
+      setBlocks((prev) =>
+        (prev ?? []).map((b) =>
+          b.seId === seId
+            ? {
+                ...b,
+                committed: b.committed
+                  .map((s) => (s.id === leftRow.id ? { ...s, side: null } : s))
+                  .filter((s) => s.id !== secondaryRow.id),
+              }
+            : b,
+        ),
+      );
+      dropQueuedSets((id) => id === secondaryRow.id);
+      // The ᴸ row's side restore must reach its queued retry payload too.
+      setQueuedSets((prev) => {
+        const queued = prev[leftRow.id];
+        if (!queued) return prev;
+        return {
+          ...prev,
+          [leftRow.id]: { ...queued, set: { ...queued.set, side: null } },
+        };
+      });
+      void repo.deleteSet(idMap[secondaryRow.id] ?? secondaryRow.id).then(
+        () => {
+          void qc.invalidateQueries({ queryKey: ["recent-exercise-ids"] });
+        },
+        () => {},
+      );
+      // Restore the ᴸ row's side to null — a lone 'left' row would read as
+      // half a set everywhere it's counted.
+      void repo.updateSet(idMap[leftRow.id] ?? leftRow.id, { side: null });
+    }
+  }
+
   function removeBlock(seId: string) {
     setBlocks((prev) => (prev ?? []).filter((b) => b.seId !== seId));
     dismissRest(seId);
@@ -1643,6 +1784,7 @@ export default function SessionScreen() {
               onCommit={(set, ctx) => commitSet(block.seId, set, ctx)}
               onSaveSet={(setId, patch) => saveSet(block.seId, setId, patch)}
               onRemoveSet={(setId) => removeSet(block.seId, setId)}
+              onSetLaterality={setCommittedLaterality}
               onRemoveBlock={() => removeBlock(block.seId)}
               onSwapExercise={swapBlockExercise}
             />
@@ -2299,6 +2441,7 @@ function ExerciseBlock({
   onCommit,
   onSaveSet,
   onRemoveSet,
+  onSetLaterality,
   onRemoveBlock,
   onSwapExercise,
 }: {
@@ -2329,6 +2472,13 @@ function ExerciseBlock({
   onCommit: (set: CommitInput, ctx: CommitCtx) => void;
   onSaveSet: (setId: string, patch: SetPatch) => void;
   onRemoveSet: (setId: string) => void;
+  /** Note 7: flip one committed set between bilateral/unilateral. */
+  onSetLaterality: (
+    seId: string,
+    exerciseType: ExerciseType,
+    primary: LoggedSet,
+    unilateral: boolean,
+  ) => void;
   onRemoveBlock: () => void;
   onSwapExercise: (seId: string, exerciseId: string, ghostId: string) => void;
 }) {
@@ -2557,7 +2707,7 @@ function ExerciseBlock({
   const override = weightUnitOverrideFor(prefs, block.exerciseId);
   const blockUnit = blockUnitFor(prefs, block.exerciseId, unit);
   const distUnit = distanceUnitFor(blockUnit);
-  const columns = columnsFor(type, blockUnit, distUnit, exercise?.laterality);
+  const columns = columnsFor(type, blockUnit, distUnit);
   const barLoaded =
     TYPE_FIELDS[type].weight && isBarLoaded(exercise?.equipment);
   const warmupEligible = TYPE_FIELDS[type].weight;
@@ -2772,6 +2922,9 @@ function ExerciseBlock({
             onDelete={() => {
               for (const r of rows) onRemoveSet(r.id);
             }}
+            onSetLaterality={(unilateral) =>
+              onSetLaterality(block.seId, type, rows[0], unilateral)
+            }
           />
         ))}
 
@@ -2841,7 +2994,10 @@ function ExerciseBlock({
             appears. Sits below every committed row AND every upcoming
             (routine-seeded) row, so it never lands between two sets the way
             the old in-row button did. Commits any open draft first (same
-            path as the row's own check button), then opens the next one. */}
+            path as the row's own check button) — with allowEmpty, so an
+            unfilled draft still pre-creates a blank committed row and the
+            next row opens (note 4: Add set must work before the previous
+            set is filled) — then opens the next one. */}
         <div className="col-span-full mt-2">
           <Button
             variant="outline"
@@ -2849,7 +3005,7 @@ function ExerciseBlock({
             className="w-full"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
-              if (draftOpen) activeRowHandleRef.current?.commit(true);
+              if (draftOpen) activeRowHandleRef.current?.commit(true, true);
               setDraftOpen(true);
             }}
             data-testid={`set-${activeIndex}-add`}
@@ -2948,14 +3104,11 @@ function BlockMenu({
   const [warmupOpen, setWarmupOpen] = useState(false);
   const labelCls =
     "px-3 pt-2 pb-1 text-2xs font-medium tracking-widest text-faint uppercase";
-  // null (never set) and any legacy value read as bilateral — the same
-  // default the editor and the session's pairing logic use.
+  // null (never set) and any legacy value (incl. pre-2026-08-08
+  // 'alternating') read as bilateral — the same default the editor and the
+  // session's pairing logic use.
   const currentLaterality: Laterality =
-    laterality === "unilateral" ||
-    laterality === "alternating" ||
-    laterality === "bilateral"
-      ? laterality
-      : "bilateral";
+    laterality === "unilateral" ? "unilateral" : "bilateral";
 
   return (
     <span className="relative">
@@ -3051,8 +3204,8 @@ function BlockMenu({
             <div className="border-t border-border" />
             <p className={labelCls}>Laterality</p>
             <p className="px-3 pb-1 text-2xs text-faint">
-              Unilateral: each side does the reps, logged as two rows.
-              Alternating: sides take turns, reps count both sides combined.
+              Bilateral: both sides work together — one row per set. Unilateral:
+              each side's reps are logged separately, as two rows.
             </p>
             {LATERALITY.map((l) => (
               <button
@@ -3137,7 +3290,7 @@ function SupersetPickerDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent title="Link superset" className="md:max-w-sm">
-        <p className="text-2xs text-faint">
+        <p className="pb-3 text-2xs text-faint">
           Choose an exercise to pair {blockName} with — you'll alternate between
           them, one set at a time.
         </p>
@@ -3491,6 +3644,7 @@ function CommittedRow({
   onSave,
   onSaveType,
   onDelete,
+  onSetLaterality,
 }: {
   rows: LoggedSet[];
   index: number;
@@ -3504,6 +3658,8 @@ function CommittedRow({
   onSave: (setId: string, patch: SetPatch) => void;
   onSaveType: (patch: Pick<SetPatch, "setType">) => void;
   onDelete: () => void;
+  /** Note 7: flip this committed set between bilateral/unilateral. */
+  onSetLaterality: (unilateral: boolean) => void;
 }) {
   const primary = rows[0];
   const secondary = rows[1] ?? null;
@@ -3640,174 +3796,256 @@ function CommittedRow({
   }
 
   return (
-    // The row is itself a `subgrid` of the block's grid, and so is each of its
-    // ᴸ/ᴿ lines: every line in the block resolves its columns from the same
-    // fixed tracks, so the value columns line up across all rows no matter
-    // which line carries a divergence badge. The lines keep their own
-    // full-bleed background (`-mx-4 px-4` nets to no track offset, so the
-    // columns still land where the header row's do).
+    // The row keeps the block's `subgrid` for the non-paired case, so value
+    // columns line up across every row (the one-column-template invariant).
+    // A unilateral PAIR takes horizontal space instead (note 3): ᴸ and ᴿ sit
+    // SIDE BY SIDE in one row — one zebra stripe per physical set, clear
+    // left/right labels — with the ⋯ still right-anchored in the menu-gutter
+    // position. The lines keep their own full-bleed background (`-mx-4 px-4`
+    // nets to no track offset, so the columns still land where the header
+    // row's do).
     <div className="relative col-span-full grid grid-cols-subgrid gap-x-2 -mx-4 border-t border-border px-4">
       <div
         className={cn(
-          "relative commit-flash col-span-full grid h-11 grid-cols-subgrid items-center gap-x-2 -mx-4 px-4 transition-colors duration-150 ease-(--ease-out-quad) hover:bg-surface-hover md:h-8",
+          "relative commit-flash col-span-full transition-colors duration-150 ease-(--ease-out-quad) hover:bg-surface-hover",
           // Zebra by physical set (this row's own index — a unilateral pair
           // is one stripe, since it's one CommittedRow), one quiet sage step;
           // hover stays the strongest so the interaction still reads.
           index % 2 === 1 ? "bg-surface-2" : "bg-surface",
-          isPaired && "pb-0.5 md:pb-0",
+          isPaired
+            ? "flex h-11 items-center gap-x-2 px-4 -mx-4 md:h-8"
+            : "grid h-11 grid-cols-subgrid items-center gap-x-2 -mx-4 px-4 md:h-8",
         )}
         data-testid={`committed-${index}`}
       >
-        <SetTypeCell
-          index={index}
-          setType={setType}
-          ringState="done"
-          onChange={(t) => onSaveType({ setType: t })}
-          testId={`committed-${index}-type`}
-          sideLabel={isPaired ? "L" : undefined}
-        />
-        {showPrevious && (
-          <PreviousCell
-            previous={previous}
-            unit={unit}
-            testId={`committed-${index}-previous`}
-          />
-        )}
-        {columns.map((c) => (
-          <button
-            key={c.key}
-            type="button"
-            onClick={() => openDetails(primary)}
-            className="num cursor-pointer text-left text-sm"
-            title="Set details"
-            data-testid={`committed-${index}-${c.key}`}
-          >
-            {committedText(c.key, primary, unit, distUnit)}
-          </button>
-        ))}
-        {/* A fixed empty cell keeps the ⋯ right-anchored in the last
-            (menu-gutter) track — the ActiveRow's commit button owns the
-            track immediately to its left, and every row shares the one
-            column template (gridTemplate above), so the draft row's actions
-            sit on the same x as every committed row's ⋯. */}
-        <span />
-        <span className="flex items-center justify-end">
-          <Dots
-            onClick={() => openDetails(primary)}
-            title="Set details"
-            data-testid={`set-menu-${index}`}
-          />
-        </span>
+        {isPaired ? (
+          <>
+            {/* ᴸ limb: set number/type + PREVIOUS + value cells. */}
+            <span className="flex min-w-0 flex-1 items-center gap-x-2">
+              <SetTypeCell
+                index={index}
+                setType={setType}
+                ringState="done"
+                onChange={(t) => onSaveType({ setType: t })}
+                testId={`committed-${index}-type`}
+                sideLabel="L"
+              />
+              {showPrevious && (
+                <PreviousCell
+                  previous={previous}
+                  unit={unit}
+                  testId={`committed-${index}-previous`}
+                />
+              )}
+              {columns.map((c) => (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={() => openDetails(primary)}
+                  className="num min-h-5 min-w-10 cursor-pointer text-left text-sm"
+                  title="Set details"
+                  data-testid={`committed-${index}-${c.key}`}
+                >
+                  {committedText(c.key, primary, unit, distUnit)}
+                </button>
+              ))}
+            </span>
 
-        {/* RIR/RPE readout + per-limb note: rendered as badges OUT of the
-            grid flow (absolute, straddling the row's top border) so the
-            fixed gutter track never widens for them — the `@2 RPE 8`
-            preview and the ᴸ/ᴿ divergence marker stay visible at every
-            viewport. */}
-        {((effort && (effortReadout(primary) || secondaryEffortDiffers)) ||
-          (notesDiffer && primaryNote)) && (
-          <span className="pointer-events-none absolute top-0 right-1.5 z-10 flex -translate-y-1/2 items-center gap-1">
-            {effort && (effortReadout(primary) || secondaryEffortDiffers) && (
-              <span
-                className={cn(
-                  "num rounded-sm border border-border bg-surface px-1 text-2xs text-faint",
-                  // Below `md:` this readout is desktop chrome the narrow row
-                  // can't spare — unless it's carrying a pair's divergence, in
-                  // which case it has to show alongside the (touch-visible) ⋯
-                  // button, or the ᴿ line's readout reads as the whole set's.
-                  !secondaryEffortDiffers && "max-md:hidden",
+            {/* ᴿ limb: label + value cells in the same column order as the
+                ᴸ side, so the pair reads side by side. Each cell opens THIS
+                limb's own details sheet, which is where its per-limb
+                RIR/RPE/note are edited. */}
+            <span className="flex min-w-0 flex-1 items-center gap-x-2">
+              <span className="num shrink-0 text-2xs tabular-nums text-faint">
+                {index + 1}ᴿ
+              </span>
+              {columns.map((c) => (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={() => openDetails(secondary)}
+                  className="num min-h-5 min-w-10 cursor-pointer text-left text-sm text-soft"
+                  title="Set details"
+                  data-testid={`committed-${index}-right-${c.key}`}
+                >
+                  {c.key === "weight"
+                    ? rightWeightText()
+                    : committedText(c.key, secondary, unit, distUnit)}
+                </button>
+              ))}
+            </span>
+
+            <span className="flex shrink-0 items-center justify-end">
+              <Dots
+                onClick={() => openDetails(primary)}
+                title="Set details"
+                data-testid={`set-menu-${index}`}
+              />
+            </span>
+
+            {/* RIR/RPE readouts + per-limb notes: badges OUT of the flex
+                flow (absolute, straddling the row's top border) so the
+                layout never widens for them — the `@2 RPE 8` preview and
+                the ᴸ/ᴿ divergence markers stay visible at every viewport.
+                The ᴸ readout hides below `md:` unless the pair diverges
+                (desktop chrome the narrow row can't spare); a divergent
+                pair's readouts show on both limbs. */}
+            {((effort && (effortReadout(primary) || secondaryEffortDiffers)) ||
+              (notesDiffer && primaryNote)) && (
+              <span className="pointer-events-none absolute top-0 right-1.5 z-10 flex -translate-y-1/2 items-center gap-1">
+                {effort &&
+                  (effortReadout(primary) || secondaryEffortDiffers) && (
+                    <span
+                      className={cn(
+                        "num rounded-sm border border-border bg-surface px-1 text-2xs text-faint",
+                        !secondaryEffortDiffers && "max-md:hidden",
+                      )}
+                      data-testid={`committed-${index}-effort`}
+                    >
+                      {effortReadout(primary) || "—"}
+                    </span>
+                  )}
+                {effort && secondaryEffortDiffers && (
+                  <span
+                    className="num rounded-sm border border-border bg-surface px-1 text-2xs text-faint"
+                    data-testid={`committed-${index}-right-effort`}
+                  >
+                    {/* This badge only prints when the ᴿ side diverges, so an
+                        empty readout renders as "—" — a cleared ᴿ effort says
+                        so, distinct from the suppressed mirror case. */}
+                    {effortReadout(secondary) || "—"}
+                  </span>
                 )}
-                data-testid={`committed-${index}-effort`}
-              >
-                {effortReadout(primary) || "—"}
+                {notesDiffer && primaryNote && (
+                  <span
+                    className="text-faint"
+                    title={primaryNote}
+                    data-testid={`committed-${index}-note`}
+                  >
+                    <StickyNote className="size-3.5" />
+                  </span>
+                )}
+                {notesDiffer && secondaryNote && (
+                  <span
+                    className="text-faint"
+                    title={secondaryNote}
+                    data-testid={`committed-${index}-right-note`}
+                  >
+                    <StickyNote className="size-3.5" />
+                  </span>
+                )}
               </span>
             )}
-            {notesDiffer && primaryNote && (
+
+            {prSetIds.has(primary.id) && (
               <span
-                className="text-faint"
-                title={primaryNote}
-                data-testid={`committed-${index}-note`}
+                className="pointer-events-none absolute top-0.5 right-1.5 text-accent"
+                title="Personal record"
+                data-testid={`committed-${index}-medal`}
               >
-                <StickyNote className="size-3.5" />
+                <Medal className="size-3.5" />
               </span>
             )}
-          </span>
+            {prSetIds.has(secondary.id) && (
+              <span
+                className="pointer-events-none absolute top-0.5 right-6 text-accent"
+                title="Personal record"
+                data-testid={`committed-${index}-right-medal`}
+              >
+                <Medal className="size-3.5" />
+              </span>
+            )}
+          </>
+        ) : (
+          <>
+            <SetTypeCell
+              index={index}
+              setType={setType}
+              ringState="done"
+              onChange={(t) => onSaveType({ setType: t })}
+              testId={`committed-${index}-type`}
+            />
+            {showPrevious && (
+              <PreviousCell
+                previous={previous}
+                unit={unit}
+                testId={`committed-${index}-previous`}
+              />
+            )}
+            {columns.map((c) => (
+              <button
+                key={c.key}
+                type="button"
+                onClick={() => openDetails(primary)}
+                className="num cursor-pointer text-left text-sm"
+                title="Set details"
+                data-testid={`committed-${index}-${c.key}`}
+              >
+                {committedText(c.key, primary, unit, distUnit)}
+              </button>
+            ))}
+            {/* A fixed empty cell keeps the ⋯ right-anchored in the last
+                (menu-gutter) track — the ActiveRow's commit button owns the
+                track immediately to its left, and every row shares the one
+                column template (gridTemplate above), so the draft row's
+                actions sit on the same x as every committed row's ⋯. */}
+            <span />
+            <span className="flex items-center justify-end">
+              <Dots
+                onClick={() => openDetails(primary)}
+                title="Set details"
+                data-testid={`set-menu-${index}`}
+              />
+            </span>
+
+            {/* RIR/RPE readout + note: rendered as badges OUT of the grid
+                flow (absolute, straddling the row's top border) so the
+                fixed gutter track never widens for them — the `@2 RPE 8`
+                preview stays visible at every viewport. */}
+            {((effort && (effortReadout(primary) || secondaryEffortDiffers)) ||
+              (notesDiffer && primaryNote)) && (
+              <span className="pointer-events-none absolute top-0 right-1.5 z-10 flex -translate-y-1/2 items-center gap-1">
+                {effort &&
+                  (effortReadout(primary) || secondaryEffortDiffers) && (
+                    <span
+                      className={cn(
+                        "num rounded-sm border border-border bg-surface px-1 text-2xs text-faint",
+                        // Below `md:` this readout is desktop chrome the narrow
+                        // row can't spare — unless it's carrying a pair's
+                        // divergence, in which case it has to show alongside
+                        // the (touch-visible) ⋯ button, or the ᴿ line's
+                        // readout reads as the whole set's.
+                        !secondaryEffortDiffers && "max-md:hidden",
+                      )}
+                      data-testid={`committed-${index}-effort`}
+                    >
+                      {effortReadout(primary) || "—"}
+                    </span>
+                  )}
+                {notesDiffer && primaryNote && (
+                  <span
+                    className="text-faint"
+                    title={primaryNote}
+                    data-testid={`committed-${index}-note`}
+                  >
+                    <StickyNote className="size-3.5" />
+                  </span>
+                )}
+              </span>
+            )}
+
+            {prSetIds.has(primary.id) && (
+              <span
+                className="pointer-events-none absolute top-0.5 right-1.5 text-accent"
+                title="Personal record"
+                data-testid={`committed-${index}-medal`}
+              >
+                <Medal className="size-3.5" />
+              </span>
+            )}
+          </>
         )}
       </div>
-
-      {prSetIds.has(primary.id) && (
-        <span
-          className="pointer-events-none absolute top-0.5 right-1.5 text-accent"
-          title="Personal record"
-          data-testid={`committed-${index}-medal`}
-        >
-          <Medal className="size-3.5" />
-        </span>
-      )}
-
-      {/* Right side of a unilateral pair: no ring, no set-type control — both
-          belong to the physical set and are controlled from the ᴸ line above.
-          No ⋯ either, but tapping any value opens this limb's own details
-          sheet, which is where its per-limb RIR/RPE/note are edited. */}
-      {isPaired && (
-        <div
-          className="relative col-span-full grid grid-cols-subgrid items-center gap-x-2 -mx-4 bg-surface px-4 pb-1.5 md:pb-1"
-          data-testid={`committed-${index}-right`}
-        >
-          <span className="num pl-6 text-2xs tabular-nums text-faint md:pl-5">
-            {index + 1}ᴿ
-          </span>
-          {showPrevious && <span />}
-          {columns.map((c) => (
-            <button
-              key={c.key}
-              type="button"
-              onClick={() => openDetails(secondary)}
-              className="num min-h-5 cursor-pointer text-left text-sm text-soft"
-              title="Set details"
-              data-testid={`committed-${index}-right-${c.key}`}
-            >
-              {c.key === "weight"
-                ? rightWeightText()
-                : committedText(c.key, secondary, unit, distUnit)}
-            </button>
-          ))}
-          {(effort && secondaryEffortDiffers) ||
-          (notesDiffer && secondaryNote) ? (
-            <span className="pointer-events-none absolute top-0.5 right-1.5 z-10 flex items-center gap-1">
-              {effort && secondaryEffortDiffers && (
-                <span
-                  className="num rounded-sm border border-border bg-surface px-1 text-2xs text-faint"
-                  data-testid={`committed-${index}-right-effort`}
-                >
-                  {/* This line only prints when it diverges, so an empty
-                      readout would render as nothing at all — identical to the
-                      suppressed mirror case. A cleared ᴿ effort says so. */}
-                  {effortReadout(secondary) || "—"}
-                </span>
-              )}
-              {notesDiffer && secondaryNote && (
-                <span
-                  className="text-faint"
-                  title={secondaryNote}
-                  data-testid={`committed-${index}-right-note`}
-                >
-                  <StickyNote className="size-3.5" />
-                </span>
-              )}
-            </span>
-          ) : null}
-          {prSetIds.has(secondary.id) && (
-            <span
-              className="pointer-events-none absolute top-0.5 right-1.5 text-accent"
-              title="Personal record"
-              data-testid={`committed-${index}-right-medal`}
-            >
-              <Medal className="size-3.5" />
-            </span>
-          )}
-        </div>
-      )}
 
       <Dialog
         open={editingRow != null}
@@ -3822,6 +4060,28 @@ function CommittedRow({
           className="md:max-w-sm"
         >
           <div className="flex flex-col gap-4">
+            {/* Note 7: the set-level unilateral toggle lives in the ᴸ limb's
+                sheet (opened from the ⋯ or a ᴸ value cell) — flipping the set
+                away from unilateral while editing the ᴿ limb would delete the
+                very row being edited. Mirrors the draft row's per-set
+                override, but writes the committed pair structurally. */}
+            {editingRow != null && editingRow.id === primary.id && (
+              <label className="flex items-start gap-2 rounded-md border border-border bg-surface-2 p-2">
+                <input
+                  type="checkbox"
+                  checked={isPaired}
+                  onChange={(e) => onSetLaterality(e.target.checked)}
+                  className="mt-0.5 size-4 shrink-0 accent-(--accent)"
+                  data-testid={`set-menu-${index}-unilateral`}
+                />
+                <span className="text-xs text-soft">
+                  <span className="font-medium text-ink">Unilateral</span>
+                  <br />
+                  Just this set: same weight both sides, log each side's reps
+                  separately.
+                </span>
+              </label>
+            )}
             <div className="grid grid-cols-2 gap-3">
               {columns.map((c, i) => (
                 <div key={c.key} className="flex flex-col gap-1">
@@ -4134,8 +4394,10 @@ type ActiveRowHandle = {
   }) => boolean;
   // Commits the current draft (same path as Enter / the check button) — the
   // block-level "Add set" button drives this imperatively since it renders
-  // outside the row.
-  commit: (adoptGhost: boolean) => void;
+  // outside the row. `allowEmpty` lets the EXPLICIT Add-set path commit a
+  // blank draft (a planned-but-unfilled set) so "Add set" always advances;
+  // Enter/blur/check keep the empty-draft no-op.
+  commit: (adoptGhost: boolean, allowEmpty?: boolean) => void;
 };
 
 function ActiveRow({
@@ -4200,9 +4462,10 @@ function ActiveRow({
   // Override wins over the exercise default.
   const laterality = lateralityOverride ?? exerciseLaterality;
   const isUnilateral = laterality === "unilateral";
-  // Hidden for alternating exercises — their sets are all alternating, so a
-  // per-set unilateral override would contradict the exercise-level semantics.
-  const lateralityEditable = exerciseLaterality !== "alternating";
+  // The per-set Unilateral toggle is always available — legacy 'alternating'
+  // exercises read as bilateral (docs/DECISIONS.md 2026-08-08), so there is
+  // no laterality the override could contradict anymore.
+  const lateralityEditable = true;
   // Seed the draft from the routine target / copied set for this index. A rep
   // range seeds only a placeholder (never a concrete reps value).
   const [weight, setWeight] = useState(
@@ -4494,7 +4757,7 @@ function ActiveRow({
     return { weightKg, reps: repsN, durationSec, distanceM };
   }
 
-  function commit(adoptGhost: boolean) {
+  function commit(adoptGhost: boolean, allowEmpty = false) {
     if (done.current) return;
     const v = parseFields(adoptGhost);
     const parsedRir = parseLoggedRirFields(rirMin, rirMax);
@@ -4503,7 +4766,10 @@ function ActiveRow({
       (f.reps && v.reps != null) ||
       (f.duration && v.durationSec != null) ||
       (f.distance && v.distanceM != null);
-    if (!anyPresent) return;
+    // An empty draft is normally a no-op (nothing to log) — the one exception
+    // is the explicit "Add set" path (allowEmpty), which pre-creates a blank
+    // committed row the user fills in later via its details sheet.
+    if (!anyPresent && !allowEmpty) return;
     done.current = true;
     clearDraft(seId);
     if (timerRunning) onToggleTimer();

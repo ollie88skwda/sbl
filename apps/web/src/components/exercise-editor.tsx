@@ -188,7 +188,12 @@ export function ExerciseEditor({
     setExerciseType((target?.exerciseType as ExerciseType) ?? "weight_reps");
     setMechanic((target?.mechanic as Mechanic | null) ?? null);
     setMovementPattern(target?.movementPattern ?? "");
-    setLaterality((target?.laterality as Laterality) ?? "bilateral");
+    // Legacy 'alternating' values read as bilateral (2026-08-08 — the option
+    // is gone, folded into bilateral); a DB row still carrying it opens as
+    // Bilateral and saving normalizes it.
+    setLaterality(
+      target?.laterality === "unilateral" ? "unilateral" : "bilateral",
+    );
     setRepsMin(target?.defaultRepsMin?.toString() ?? "");
     setRepsMax(target?.defaultRepsMax?.toString() ?? "");
     setRestSec(target?.defaultRestSec?.toString() ?? "");

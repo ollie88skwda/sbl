@@ -64,7 +64,7 @@ export type NewSetInput = {
   durationSec?: number | null;
   /** Distance-type exercises (canonical meters). */
   distanceM?: number | null;
-  /** Limb for a unilateral exercise; omit/null for bilateral + alternating. */
+  /** Limb for a unilateral exercise; omit/null for bilateral (and legacy alternating) rows. */
   side?: SetSide | null;
 };
 

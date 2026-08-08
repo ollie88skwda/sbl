@@ -3,6 +3,7 @@ import {
   createExercise,
   EMAIL,
   PASSWORD,
+  rowCount,
   signIn,
   waitForExercise,
   waitForSetLogs,
@@ -320,22 +321,30 @@ test("a mirrored pair prints no ᴿ readout; clearing the ᴿ side prints — be
   await expect(page.getByTestId("committed-0-effort")).toBeVisible();
   await expect(page.getByTestId("committed-0-effort")).toHaveText("@2 RPE 8");
 
-  // One badge per line, of different widths — the committed pair's columns
-  // still line up, because both lines share the row's own grid tracks (the
-  // blank ᴿ weight button included).
-  expect(await cellX(page, "committed-0-right-weight")).toBeCloseTo(
-    await cellX(page, "committed-0-weight"),
-    0,
-  );
-  expect(await cellX(page, "committed-0-right-reps")).toBeCloseTo(
-    await cellX(page, "committed-0-reps"),
-    0,
-  );
+  // The pair is HORIZONTAL (note 3): ᴸ and ᴿ sit side by side in ONE row —
+  // the ᴿ cells are to the RIGHT of the ᴸ cells at the same y, not on a
+  // stacked line below them.
+  expect(
+    await cellX(page, "committed-0-right-weight"),
+    "committed-0-right-weight sits right of committed-0-weight",
+  ).toBeGreaterThan(await cellX(page, "committed-0-weight"));
+  expect(
+    await cellX(page, "committed-0-right-reps"),
+    "committed-0-right-reps sits right of committed-0-reps",
+  ).toBeGreaterThan(await cellX(page, "committed-0-reps"));
+  const leftBox = (await page
+    .getByTestId("committed-0-weight")
+    .boundingBox()) as { y: number };
+  const rightBox = (await page
+    .getByTestId("committed-0-right-weight")
+    .boundingBox()) as { y: number };
+  // Same row, not stacked: a 1px rounding drift between the two limb groups
+  // is fine — a stacked ᴿ line sat ~44px lower.
+  expect(Math.abs(rightBox.y - leftBox.y)).toBeLessThan(8);
 
-  // …and it has to hold across the block, not just within the pair: log a
-  // second, badge-free set. Every row of one exercise shares one grid, so the
-  // widest badge in the block sizes the auto menu gutter once. Sized per row,
-  // set 1's values would sit left of set 2's and of the draft row's.
+  // …and the one-column-template invariant still holds across the block for
+  // the non-paired rows: log a second, badge-free set. Every bilateral row of
+  // one exercise shares one grid, so their value columns line up.
   await page.getByTestId("set-1-add").click();
   await page.getByTestId("set-1-weight").fill("20");
   await page.getByTestId("set-1-reps").fill("8");
@@ -345,18 +354,16 @@ test("a mirrored pair prints no ᴿ readout; clearing the ᴿ side prints — be
   // cells (set-2-*).
   await page.getByTestId("set-2-add").click();
 
-  const repsX = await cellX(page, "committed-0-reps");
-  for (const [id, wrapper] of [
-    ["committed-0-right-reps", false],
-    ["committed-1-reps", false],
-    ["committed-1-right-reps", false],
-    ["set-2-reps", false],
-  ] as const) {
-    expect(
-      await cellX(page, id, wrapper),
-      `${id} vs committed-0-reps`,
-    ).toBeCloseTo(repsX, 0);
-  }
+  const pairL = await cellX(page, "committed-0-reps");
+  const pairR = await cellX(page, "committed-0-right-reps");
+  // Both committed rows here are pairs — their ᴸ/ᴿ splits land at the same x
+  // across sets (same flex structure, same block tracks), and the draft row's
+  // standard track sits between them: the horizontal-space trade a pair makes
+  // (its ᴸ side takes the left half of the row, its ᴿ side the right).
+  expect(await cellX(page, "committed-1-reps")).toBeCloseTo(pairL, 0);
+  expect(await cellX(page, "committed-1-right-reps")).toBeCloseTo(pairR, 0);
+  expect(pairL).toBeLessThan(await cellX(page, "set-2-reps"));
+  expect(pairR).toBeGreaterThan(await cellX(page, "set-2-reps"));
 
   // The draft row's controls stay right-anchored: its ✓ (Mark set done)
   // lands at the same x as every committed row's ⋯ (the check owns the
@@ -377,7 +384,7 @@ test("a mirrored pair prints no ᴿ readout; clearing the ᴿ side prints — be
   ).toBeLessThan(menuX);
 });
 
-test("alternating exercises log as a single row with a total-reps header", async ({
+test("a legacy alternating exercise reads as bilateral (note 5)", async ({
   page,
 }) => {
   const EX = `Alt Curl ${Date.now()}`;
@@ -398,14 +405,17 @@ test("alternating exercises log as a single row with a total-reps header", async
   await page.getByTestId("start-session-btn").click();
   await page.getByTestId(`pick-exercise-${copy}`).click();
 
+  // Alternating was folded into bilateral (note 5): the "total reps" header
+  // wording is gone — a legacy row logs exactly like a bilateral one.
   const block = page.getByTestId(`block-${copy}`);
-  await expect(block).toContainText("total reps");
-  // No paired ᴿ line for alternating — it logs identically to bilateral.
+  await expect(block).toContainText("reps");
+  await expect(block).not.toContainText("total reps");
+  // No paired ᴿ line — it logs identically to bilateral.
   await expect(page.getByTestId("set-0-right-weight")).toHaveCount(0);
-  // The per-set Unilateral toggle is hidden for alternating exercises — a
-  // per-set override would contradict the exercise-level semantics.
+  // And the per-set Unilateral toggle IS available — legacy alternating reads
+  // as bilateral, so nothing contradicts a per-set override anymore.
   await page.getByTestId("set-0-more").click();
-  await expect(page.getByTestId("set-0-unilateral")).toHaveCount(0);
+  await expect(page.getByTestId("set-0-unilateral")).toBeVisible();
   await page.keyboard.press("Escape");
 });
 
@@ -468,13 +478,14 @@ test("laterality menu speaks unilateral/bilateral, not sides (note 15)", async (
   const menu = page.getByTestId(`block-${EX}-menu-popup`);
   await expect(menu).toContainText("Laterality");
   // The labels are the unilateral/bilateral vocabulary, not the old
-  // "Both sides / One side" names (note 15).
+  // "Both sides / One side" names (note 15) — and alternating is gone
+  // (note 5), folded into bilateral.
   await expect(menu).toContainText("Unilateral");
   await expect(menu).toContainText("Bilateral");
-  await expect(menu).toContainText("Alternating");
-  // The explainer tells unilateral apart from alternating.
-  await expect(menu).toContainText("each side does the reps");
-  await expect(menu).toContainText("reps count both sides combined");
+  await expect(menu).not.toContainText("Alternating");
+  // The explainers tell the two remaining options apart.
+  await expect(menu).toContainText("one row per set");
+  await expect(menu).toContainText("logged separately");
   await page.keyboard.press("Escape");
 });
 
@@ -524,4 +535,119 @@ test("library last-set summary shows both sides of a divergent unilateral pair",
   await expect(page.getByTestId(`exercise-row-${copy}`)).toContainText(
     "Last: 40 kg × 8 / 35 kg × 12",
   );
+});
+
+test("the committed set's ⋯ flips the set to unilateral and back (note 7)", async ({
+  page,
+}) => {
+  const EX = `Committed Toggle ${Date.now()}`;
+
+  await page.goto("/library");
+  await createExercise(page, EX);
+  await waitForExercise(page, EX);
+
+  await page.goto("/train");
+  await page.getByTestId("start-session-btn").click();
+  await expect(page).toHaveURL(/\/session\//);
+  await page.getByTestId(`pick-exercise-${EX}`).click();
+
+  // Log one bilateral set.
+  await page.getByTestId("set-0-weight").fill("30");
+  await page.getByTestId("set-0-reps").fill("10");
+  await page.getByTestId("set-0-done").click();
+  await expect(page.getByTestId("committed-0")).toBeVisible();
+  await expect(page.getByTestId("committed-0-right-weight")).toHaveCount(0);
+  await waitForSetLogs(page, EX, 1);
+
+  // Non-deleted row count (the toggle's remove is a soft delete, so the raw
+  // set_logs count would keep the ᴿ row forever).
+  const liveRows = () =>
+    page.evaluate(async (n) => {
+      const { data: ex } = await window.__frog.supabase
+        .from("exercises")
+        .select("id")
+        .eq("name", n)
+        .single();
+      const { data: ses } = await window.__frog.supabase
+        .from("session_exercises")
+        .select("id")
+        .eq("exercise_id", ex.id);
+      const { count } = await window.__frog.supabase
+        .from("set_logs")
+        .select("id", { count: "exact", head: true })
+        .in(
+          "session_exercise_id",
+          ses.map((s) => s.id),
+        )
+        .is("deleted_at", null);
+      return count ?? 0;
+    }, EX);
+
+  // The ⋯ → details sheet carries the unilateral toggle; flipping it adds
+  // the paired ᴿ row mirroring the ᴸ values — nothing else changes.
+  await page.getByTestId("set-menu-0").click();
+  await expect(page.getByTestId("set-menu-0-unilateral")).toBeVisible();
+  await page.getByTestId("set-menu-0-unilateral").check();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("committed-0-right-reps")).toContainText("10");
+  await expect.poll(liveRows).toBe(2);
+
+  // The flip is structural: the ᴸ row's side went null → 'left' server-side,
+  // so the pair survives a reload instead of re-splitting into two sets.
+  await page.reload();
+  await expect(page.getByTestId("committed-0")).toBeVisible();
+  await expect(page.getByTestId("committed-0-right-reps")).toContainText("10");
+  await expect(page.getByTestId("committed-1")).toHaveCount(0);
+
+  // Flip it back — the ᴿ row is soft-deleted and the set is one row again.
+  await page.getByTestId("set-menu-0").click();
+  await expect(page.getByTestId("set-menu-0-unilateral")).toBeVisible();
+  await page.getByTestId("set-menu-0-unilateral").uncheck();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("committed-0-right-weight")).toHaveCount(0);
+  await expect.poll(liveRows).toBe(1);
+
+  // And the restore persisted too.
+  await page.reload();
+  await expect(page.getByTestId("committed-0")).toBeVisible();
+  await expect(page.getByTestId("committed-0-right-weight")).toHaveCount(0);
+  await expect.poll(liveRows).toBe(1);
+});
+
+test("Add set pre-creates a blank committed row when the previous set is unfilled (note 4)", async ({
+  page,
+}) => {
+  const EX = `Blank Add ${Date.now()}`;
+
+  await page.goto("/library");
+  await createExercise(page, EX);
+  await waitForExercise(page, EX);
+
+  await page.goto("/train");
+  await page.getByTestId("start-session-btn").click();
+  await expect(page).toHaveURL(/\/session\//);
+  await page.getByTestId(`pick-exercise-${EX}`).click();
+
+  const before = await rowCount(page, "set_logs");
+
+  // No values typed at all — Add set must still advance (committing the
+  // empty draft as a blank committed row the user fills in later).
+  await page.getByTestId("set-0-add").click();
+
+  // The blank row renders with — placeholders and the next draft is open.
+  await expect(page.getByTestId("committed-0")).toBeVisible();
+  await expect(page.getByTestId("committed-0-weight")).toHaveText("—");
+  await expect(page.getByTestId("committed-0-reps")).toHaveText("—");
+  await expect(page.getByTestId("set-1-weight")).toBeVisible();
+
+  // Server-side: exactly one blank row landed.
+  await expect.poll(() => rowCount(page, "set_logs")).toBe(before + 1);
+
+  // Fill the blank set in later via its details sheet.
+  await page.getByTestId("set-menu-0").click();
+  await page.getByTestId("edit-0-weight").fill("50");
+  await page.getByTestId("edit-0-reps").fill("5");
+  await page.getByTestId("edit-0-save").click();
+  await expect(page.getByTestId("committed-0-weight")).toHaveText("50");
+  await expect(page.getByTestId("committed-0-reps")).toHaveText("5");
 });
